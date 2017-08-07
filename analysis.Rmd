@@ -1,0 +1,374 @@
+---
+title: "Cylinder"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+## Introduction
+
+Input: 87 trials with RSD=0.4, row of 10 plants. We extracted flat section on the top of tube. We extracted points at most 0.5 cm above the top and at least below the top and with y coordinate between -0.5 and 0.5. This means we extracted 1cm wide flat strip of height 1cm. The total volume of seen dirt is thus 1x1xlength=150cm^3.
+
+## Data
+
+For each insertion angle of tube, we saved a .csv file:
+data_cylinder1-2_top30/cylinder1-2_top30_424582000.csv
+
+data files: [depth, numPoints,  totalLength, surfaceArea, volume, radiiAvg, radiiSD]
+
+### Extract Data
+
+```{r,  results="hide"}
+angles <- c(30) #seq(30,90, by=5)
+
+# df <- data.frame(matrix(ncol = 3, nrow = 0))
+# x <- c("observed", "actual", "angle")
+# colnames(df) <- x
+observed<-NULL
+true<-NULL
+df=NULL
+
+for(angle in angles) {
+  # Get observed data
+  setwd(paste("C:/Users/sapetka/Box Sync/ROOTS/models/Rootbox_v6b/ROGER/Trial Data/Trial_Data_012/data_cylinder1-2_top",angle, sep=""))
+  files = list.files(pattern="*.csv")
+  # First apply read.csv, then rbind
+  observed = do.call(rbind, lapply(files,   function(x) {
+    ret<-read.csv(x, stringsAsFactors = FALSE, header=FALSE)
+    ret$file <- x 
+    ret
+    }))
+  
+
+  # get true volumes
+  setwd("C:/Users/sapetka/Box Sync/ROOTS/models/Rootbox_v6b/ROGER/Trial Data/Trial_Data_012/data_all_csv")
+  files = list.files(pattern="*.csv")
+  # First apply read.csv, then rbind
+  true = do.call(rbind, lapply(files, function(x) read.csv(x, stringsAsFactors = FALSE, header=FALSE)))
+  
+  df <- rbind(df,cbind(observed,true[-1],rep(angle,length(observed$V1))))
+}
+
+colnames(df) <- c("depth", "numPoints",  "totalLength", "surfaceArea", "volume", "radiiAvg", "radiiSD",  "file", "numPoints_T",  "totalLength_T", "surfaceArea_T", "volume_T", "radiiAvg_T", "radiiSD_T", "angle")
+
+df$angle <- factor(df$angle)
+df$depth_levels<-cut(df$depth,breaks=15)
+df$depth_levels <- factor(df$depth_levels)
+```
+
+
+```{r,  results="hide"}
+# install.packages("Hmisc", dependencies = TRUE)
+# install.packages("psych", dependencies = TRUE)
+# install.packages("car", dependencies = TRUE)
+# install.packages("ggplot2", dependencies = TRUE)
+# install.packages("rgl", dependencies = TRUE)
+# install.packages("lazyeval", lib = "C:/Users/sapetka/Documents/R/win-library/3.4")
+
+library(Hmisc)
+library(psych)
+library(car)
+library(ggplot2)
+library(rgl)
+```
+
+```{r, echo=TRUE}
+vol_by_trial<-by(df$volume, df$file, sum)
+vol_by_trial_T<-by(df$volume_T, df$file, sum)
+mean(vol_by_trial_T/vol_by_trial)
+plot(vol_by_trial, vol_by_trial_T)
+```
+
+```{r, echo=TRUE}
+fit<-lm(volume_T~volume+depth, data=df)
+summary(fit)
+vif(fit)
+```
+
+### Select variables for regression modelling
+```{r, echo=TRUE}
+data <- subset(df, select = c(depth, volume, volume_T))
+pairs.panels(data, col="red")
+```
+
+### Split data into training and validation samples
+```{r, echo=TRUE}
+
+require(caTools)
+train <- data[1:6450,]
+valid <- data[6451:12900,]
+```
+
+### Create a model which avoids multi-collinearity and checks the p-values
+```{r, echo=TRUE}
+fit<-lm(volume_T~volume+depth, data=train)
+summary(fit)
+vif(fit)
+```
+
+# Yeo-Johnson Power Transformation (on data including zeros)
+### Transform non-linear vars
+```{r, echo=TRUE}
+#this only works on positive values, but we have many zeros
+library(MASS)
+
+depth<-train$depth
+volume<-train$volume
+volume_T<-train$volume_T
+
+lambda <- boxCox(volume_T~volume+depth, family="yjPower", plotit = TRUE)  
+lambda<-lambda$x[which(lambda$y==max(lambda$y))]   #lambda=0.2222222
+
+lambda1 <- boxCox(volume_T~1, family="yjPower", plotit = TRUE)  
+lambda1<-lambda1$x[which(lambda1$y==max(lambda1$y))]
+
+lambda2 <- boxCox(volume~1, family="yjPower", plotit = TRUE)  
+lambda2<-lambda2$x[which(lambda2$y==max(lambda2$y))]
+
+#yjPower https://rweb.stat.umn.edu/R/site-library/car/html/bcPower.html
+# yjPower(X)=((X+1)^(lambda)-1)/lambda
+volume_yj <- yjPower(volume, lambda=lambda)
+volume_T_yj <- yjPower(volume_T, lambda=lambda)
+train_yj<-data.frame(depth=depth, volume=volume_yj, volume_T=volume_T_yj)
+valid_yj<-data.frame(depth=valid$depth, volume=yjPower(valid$volume, lambda=lambda), volume_T=yjPower(valid$volume_T, lambda=lambda))
+pairs.panels(train_yj, col="red")
+
+fit_yj<-lm(volume_T~volume+depth, data=train_yj)
+plot(fit_yj)
+summary(fit_yj) 
+```
+
+### Check for non-linearity property
+```{r, echo=TRUE}
+crPlots(fit_yj)
+```
+
+#### Now explore the model and results (we will be using data)
+```{r, echo=TRUE}
+crPlots(fit_yj)
+pairs.panels(train_yj, col="red")
+```
+
+
+###predict the outcome of the testing data
+```{r, echo=TRUE}
+predicted_yj <- predict(fit_yj, newdata=valid_yj[ ,-3], se.fit=FALSE)
+```
+
+### what is the proportion variation explained in the outcome of the testing data?
+### i.e., what is 1-(SSerror/SStotal)
+```{r, echo=TRUE}
+actual_yj <- yjPower(valid$volume_T, lambda=lambda) 
+rsq <- 1-sum((actual_yj-predicted_yj)^2)/sum((actual_yj-mean(actual_yj))^2)
+print(rsq)
+```
+
+```{r, echo=TRUE}
+vstats <- summary(train_yj$volume)
+vstats
+
+vMin = as.numeric(vstats[1]) # Just want numbers not data frames
+v1Q = as.numeric(vstats[2])
+vMedian = as.numeric(vstats[3])
+v3Q = as.numeric(vstats[5])
+vMax = as.numeric(vstats[6])
+```
+
+### Next: Consider glm and gls, especially for logistic regression
+
+
+### Add regression lines to the plot
+```{r, echo=TRUE}
+panel.lm = function(x, y, ...) {
+  tmp <- lm(y ~ x, na.action = na.omit)
+  if(length(x)>4) {
+    points(x, y, ...)
+    abline(tmp, col="blue")
+    panel.smooth(x, y, col.smooth="red", ...)
+  } else {
+    points(x, y, ...)
+  }
+}
+```
+
+```{r, echo=TRUE}
+coplot(volume_T ~ depth | volume, data=train_yj, 
+       col="orange", panel=panel.lm)
+```
+
+##### multiple regression 3D plots
+
+### Let us check the impact of variable selection on the model
+```{r, echo=TRUE}
+scatter3d(z=train_yj$depth, x=train_yj$volume, y=train_yj$volume_T)
+```
+
+
+# Remove zeros, then log transform
+```{r, echo=TRUE}
+#this only works on positive values, but we have many zeros
+library(MASS)
+train <- data[1:6450,]
+valid <- data[6451:12900,]
+
+depth<-train$depth[train$volume!=0]
+volume<-train$volume[train$volume!=0]
+volume_T<-train$volume_T[train$volume!=0]
+train_log<-data.frame(depth, volume=log(volume), volume_T=log(volume_T))
+
+valid_log<-data.frame(depth=valid$depth[valid$volume!=0], volume=log(valid$volume[valid$volume!=0]), volume_T=log(valid$volume_T[valid$volume!=0]))
+
+pairs.panels(train_log, col="red")
+
+fit_log<-lm(volume_T~depth+volume, data=train_log)
+plot(fit_log)
+summary(fit_log) 
+crPlots(fit_log)
+```
+
+
+
+
+```{r, echo=TRUE}
+fraction_of_zeros <- function(x) {
+  sum(x==0)/length(x)
+}
+train$p0<-NULL
+train$p0<-ave(train$volume, train$depth, FUN= fraction_of_zeros)
+plot(train$p0,train$depth)
+
+train$p0_T<-NULL
+train$p0_T<-ave(train$volume_T, train$depth, FUN=fraction_of_zeros)
+plot(train$p0_T,train$depth)
+
+valid$p0<-ave(valid$volume, valid$depth, FUN= fraction_of_zeros)
+valid$p0_T<-ave(valid$volume_T, valid$depth, FUN=fraction_of_zeros)
+
+```
+
+```{r, echo=TRUE}
+pairs.panels(train_log, col="red")
+fit_log<-lm(volume_T~depth+volume, data=train_log)
+plot(fit_log)
+summary(fit_log) 
+```
+
+
+###predict the outcome of the testing data
+```{r, echo=TRUE}
+
+valid$logVol_pred[valid$volume!=0] <-predict(fit_log, newdata=valid_log[ ,-3], se.fit=FALSE)
+
+# predicted volume for non-zero observed volume, equals predicted$volume_mean(1-p0)
+valid$logVol_mean <- ave(valid$logVol_pred, valid$depth, FUN= function(x) mean(x,na.rm=TRUE))
+valid$logVol_mean[is.na(valid$logVol_mean)] <-0 
+
+valid$logVol_pred[valid$volume==0] <- valid$logVol_mean[valid$volume==0]*(1-valid$p0[valid$volume==0])
+#valid$logVol_pred[valid$volume!=0] <- valid$logVol_pred[valid$volume!=0] #*(1-valid$p0[valid$volume==0])
+
+nonzero <- valid[valid$logVol_pred!=0,]
+nonzero$vol_pred<-exp(nonzero$logVol_pred)
+
+plot(nonzero$vol_pred, nonzero$volume_T)
+
+```
+
+### what is the proportion variation explained in the outcome of the testing data?
+### i.e., what is 1-(SSerror/SStotal)
+```{r, echo=TRUE}
+actual <- valid$volume_T
+predicted<-exp(valid$logVol_pred)
+rsq <- 1-sum((actual-predicted)^2)/sum((actual-mean(actual))^2)
+print(rsq)
+```
+
+### Analysis depth versus observed volume
+
+```{r, echo=TRUE}
+means<- tapply(df$volume, df$depth_levels, mean)
+variance <- tapply(df$volume, df$depth_levels, var)
+
+plot(means)
+boxplot(df$volume ~ df$depth_levels, xlab="depth", ylab="observed volume", col=rainbow(13))
+
+aov<- aov(df$volume ~ df$depth_levels)
+summary(aov)
+```
+
+### Adding column residuals to df
+
+```{r, echo=TRUE}
+residuals<-NULL
+fit<-NULL
+angles_30<-c(45)
+for (angle in angles) {
+  d<-df[df$angle==angle,]
+  lm <- lm(d$volume_T ~ d$volume)
+  fit <- cbind(fit, lm)
+  #s<- summary(fit)
+  residuals<-c(residuals, abs(residuals(lm)))
+}
+
+plot(d$volume, d$volume_T)
+abline(lm)
+
+df$residuals <- residuals
+plot(rev(unique(df$depth)), tapply(df$residuals, df$depth, mean))
+
+```
+
+## Fit for the tube (angle 30° with the ground)
+
+### Linear fit true_volume ~ observed_volume
+
+```{r, echo=TRUE}
+d<-df[df$angle==30,]
+x<-d$volume
+y<-d$volume_T
+lmXY<-lm(y~x)
+plot(x,y)
+abline(lmXY)
+```
+
+###  Linear fit true_volume ~ observed_volume*ext(depth)
+```{r,echo=TRUE}
+x<-df$volume
+y<-df$volume_T
+z<-df$depth
+lmXYZ<-lm(y~1+x+z+x*z)
+summary(lmXYZ)
+plot(lmXYZ)
+```
+
+### Linear fit log(true_volume) ~ log(observed_volume)*ext(depth)
+```{r,echo=TRUE}
+x<-df$volume
+y<-df$volume_T
+z<-df$depth
+loglmXYZ<-lm(log(y+0.0001)~1+log(x+0.0001)+z+log(x+0.0001)*z)
+summary(loglmXYZ)
+plot(lmXYZ)
+```
+
+### Comparison anova
+```{r,echo=TRUE}
+
+# the smaller the AIC or BIC, the better the fit.
+AIC(lmXY,lmXYZ,loglmXYZ)
+```
+
+
+###  Linear fit observed_volume ~ ext(depth)
+```{r,echo=TRUE}
+lmXZ<-lm(log(x+0.0001)~z)
+summary(lmXZ)
+```
+
+###  Linear fit true_volume ~ ext(depth)
+```{r,echo=TRUE}
+lmYZ<-lm(log(y+0.0001)~z)
+summary(lmYZ)
+```
+
