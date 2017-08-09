@@ -26,40 +26,49 @@ angles <- c(30) #seq(30,90, by=5)
 # df <- data.frame(matrix(ncol = 3, nrow = 0))
 # x <- c("observed", "actual", "angle")
 # colnames(df) <- x
-observed<-NULL
-true<-NULL
-df=NULL
+observed <- NULL
+true <- NULL
+df <- NULL
+
+mydir <- file.path(Sys.getenv('HOMEPATH'), paste0("Box Sync/ROOTS/models/Rootbox_v6b/ROGER/Trial Data/Trial_Data_012/"))
 
 for(angle in angles) {
+  datadir <- file.path(mydir, paste0("data_cylinder1-2_top", angle))
+  # Get the files names
+  files <- list.files(path = datadir, pattern="*.csv", full.names = TRUE)
+
   # Get observed data
-  setwd(paste("C:/Users/sapetka/Box Sync/ROOTS/models/Rootbox_v6b/ROGER/Trial Data/Trial_Data_012/data_cylinder1-2_top",angle, sep=""))
-  files = list.files(pattern="*.csv")
+
   # First apply read.csv, then rbind
-  observed = do.call(rbind, lapply(files,   function(x) {
-    ret<-read.csv(x, stringsAsFactors = FALSE, header=FALSE)
-    ret$file <- x 
-    ret
-    }))
-  
+  observed_list <- lapply(files,   
+                          function(x) {
+                            cbind(read.csv(x, stringsAsFactors = FALSE, header=FALSE), file = basename(x))
+                          })
+  observed <- do.call(rbind, observed_list)
 
   # get true volumes
-  setwd("C:/Users/sapetka/Box Sync/ROOTS/models/Rootbox_v6b/ROGER/Trial Data/Trial_Data_012/data_all_csv")
-  files = list.files(pattern="*.csv")
+  truth_dir <- file.path(mydir, "/data_all_csv")
+  truth_files <- list.files(path = truth_dir, pattern = "*.csv", full.names = TRUE)
   # First apply read.csv, then rbind
-  true = do.call(rbind, lapply(files, function(x) read.csv(x, stringsAsFactors = FALSE, header=FALSE)))
+  truth_list <- lapply(truth_files, 
+                       function(x){
+                         read.csv(x, stringsAsFactors = FALSE, header=FALSE)
+                       } )
+  truth <- do.call(rbind, truth_list)
   
-  df <- rbind(df,cbind(observed,true[-1],rep(angle,length(observed$V1))))
+  df <- rbind(df, cbind(observed, truth[-1], rep(angle, times = nrow(observed))))
 }
 
 colnames(df) <- c("depth", "numPoints",  "totalLength", "surfaceArea", "volume", "radiiAvg", "radiiSD",  "file", "numPoints_T",  "totalLength_T", "surfaceArea_T", "volume_T", "radiiAvg_T", "radiiSD_T", "angle")
 
 df$angle <- factor(df$angle)
-df$depth_levels<-cut(df$depth,breaks=15)
+df$depth_levels <- cut(df$depth, breaks=15)
 df$depth_levels <- factor(df$depth_levels)
 ```
 
 
 ```{r,  results="hide"}
+# install.packages(pkgs = c('Hmisc', 'psych', 'car', 'ggplot2', 'rgl', 'lazyeval'), dependencies = TRUE)
 # install.packages("Hmisc", dependencies = TRUE)
 # install.packages("psych", dependencies = TRUE)
 # install.packages("car", dependencies = TRUE)
@@ -75,14 +84,14 @@ library(rgl)
 ```
 
 ```{r, echo=TRUE}
-vol_by_trial<-by(df$volume, df$file, sum)
-vol_by_trial_T<-by(df$volume_T, df$file, sum)
-mean(vol_by_trial_T/vol_by_trial)
+vol_by_trial <- by(df$volume, df$file, sum)
+vol_by_trial_T <- by(df$volume_T, df$file, sum)
+mean(vol_by_trial_T / vol_by_trial)
 plot(vol_by_trial, vol_by_trial_T)
 ```
 
 ```{r, echo=TRUE}
-fit<-lm(volume_T~volume+depth, data=df)
+fit <- lm(volume_T~volume+depth, data=df)
 summary(fit)
 vif(fit)
 ```
@@ -319,7 +328,7 @@ plot(rev(unique(df$depth)), tapply(df$residuals, df$depth, mean))
 
 ```
 
-## Fit for the tube (angle 30° with the ground)
+## Fit for the tube (angle 30? with the ground)
 
 ### Linear fit true_volume ~ observed_volume
 

@@ -1,6 +1,6 @@
 # Roots
 
-All of the latest MATLAB files are located in the folder ROOTS/models/Rootbox_v6b/ROGER. These are the files we've been running on the ROGER computer. 
+All of the latest MATLAB files are located in the folder ROOTS/models/Rootbox_v6b/ROGER on Box. These are the files we've been running on the ROGER computer. 
 
 Older versions are located in ROOTS/models/Rootbox_v6b.
 
@@ -24,6 +24,7 @@ Major changes:
 See the README folder in ROOTS/models/Rootbox_v6b/ROGER for an overview of the MATLAB files and data format.
 
 # Data
+
 Description of the data files (naming convention and format of the files):
 
 Currently, the folder Trial_Data_010 contains the raw data for each of 160 runs of the file run_batch_crown_alldays.m on ROGER, as well as data for the cylindrical rhizotrons.
